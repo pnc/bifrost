@@ -77,12 +77,23 @@ listen_socket(Port, TcpOpts) ->
     gen_tcp:listen(Port, TcpOpts).
 
 await_connections(Listen, InitialState) ->
+    process_flag(trap_exit, true),
     proc_lib:spawn_link(?MODULE,
                         establish_control_connection,
                         [self(), Listen, InitialState]),
     receive
-        _ -> await_connections(Listen, InitialState)
-    end.
+        {'EXIT', _Pid, normal} -> % not a crash
+            ok;
+        {'EXIT', _Pid, shutdown} -> % manual termination, not a crash
+            ok;
+        {'EXIT', Pid, Info} ->
+            error_logger:error_msg("Control connection ~p crashed: ~p~n", [Pid, Info]);
+        {accepted, _Who} -> % spawned process accepted socket
+            ok;
+        _ ->
+            ok
+    end,
+    await_connections(Listen, InitialState).
 
 establish_control_connection(SrvPid, Listen, InitialState) ->
     case gen_tcp:accept(Listen) of
